@@ -5,7 +5,7 @@
 Inspiration picks a new quote each morning, pairs it with a beautiful photograph from Unsplash, composites them into a wallpaper, and sets it as your desktop background -- automatically. It ships with 10 curated quote collections spanning Zen, Stoicism, Rumi, Naval Ravikant, Alan Watts, and more.
 
 <p align="center">
-  <img src="docs/screenshot-wallpaper.png" alt="Example wallpaper" width="720">
+  <img src="docs/inspirational_quote.png" alt="Example wallpaper" width="720">
 </p>
 
 ---
@@ -162,7 +162,11 @@ This opens `http://localhost:3456` in your browser with five tabs:
     "blurSigma": 2                   // gaussian blur radius (0 = none)
   },
   "archivePath": "~/Pictures/DailyQuotes",  // where to save wallpapers
-  "setAllDisplays": true             // set wallpaper on all monitors (macOS)
+  "setAllDisplays": true,            // set wallpaper on all monitors (macOS)
+  "scheduledTime": {
+    "hour": 7,                       // 24-hour clock hour for the daily run
+    "minute": 0                      // minute for the daily run
+  }
 }
 ```
 
@@ -220,9 +224,9 @@ The `theme` field is used as a search query for Unsplash background images -- pi
 | Windows | Task Scheduler | `powershell scripts\install-task-scheduler.ps1` | `powershell scripts\install-task-scheduler.ps1 -Uninstall` |
 | Linux/ChromeOS | cron | `bash scripts/install-cron.sh` | `bash scripts/install-cron.sh uninstall` |
 
-All schedulers default to **7:00 AM daily**. Edit the respective script to change the time.
+You can configure the daily run time from the **Schedule** tab in the [web UI](#web-ui) — pick any hour and minute and click **Save Time**. The setting is stored in `data/config.json` and applied the next time you (re)install the scheduler.
 
-You can also manage the schedule from the **Schedule** tab in the [web UI](#web-ui).
+To change the time without the web UI, edit `scheduledTime` in `data/config.json` directly, then reinstall the scheduler for your platform.
 
 ---
 
