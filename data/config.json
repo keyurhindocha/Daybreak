@@ -1,5 +1,16 @@
 {
-  "activeSources": ["naval", "zen", "stoicism", "rumi", "watts", "musashi", "emerson", "buddha", "laotzu", "brown"],
+  "activeSources": [
+    "naval",
+    "zen",
+    "stoicism",
+    "rumi",
+    "watts",
+    "musashi",
+    "emerson",
+    "buddha",
+    "laotzu",
+    "brown"
+  ],
   "resolution": {
     "width": 3456,
     "height": 2234
@@ -13,5 +24,9 @@
     "blurSigma": 2
   },
   "archivePath": "~/Pictures/DailyQuotes",
-  "setAllDisplays": true
+  "setAllDisplays": true,
+  "scheduledTime": {
+    "hour": 20,
+    "minute": 0
+  }
 }

@@ -49,6 +49,8 @@ export interface AppConfig {
   archivePath: string;
   /** Whether to apply the wallpaper to all displays (macOS only). */
   setAllDisplays: boolean;
+  /** Time of day for the daily scheduler (hour 0-23, minute 0-59). */
+  scheduledTime: { hour: number; minute: number };
   /** Unsplash API access key loaded from .env. */
   unsplashAccessKey: string;
   /** Absolute path to the project root directory. */
@@ -88,6 +90,7 @@ export function loadConfig(): AppConfig {
     background: raw.background,
     archivePath,
     setAllDisplays: raw.setAllDisplays,
+    scheduledTime: raw.scheduledTime ?? { hour: 7, minute: 0 },
     unsplashAccessKey,
     projectRoot: PROJECT_ROOT,
     cachePath,

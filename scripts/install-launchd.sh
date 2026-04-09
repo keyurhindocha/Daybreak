@@ -21,6 +21,9 @@ if [ "$1" = "uninstall" ]; then
     exit 0
 fi
 
+SCHEDULE_HOUR="${SCHEDULE_HOUR:-7}"
+SCHEDULE_MINUTE="${SCHEDULE_MINUTE:-0}"
+
 echo "Installing ${PLIST_NAME}..."
 
 # Ensure LaunchAgents directory exists
@@ -46,9 +49,9 @@ cat > "$PLIST_DEST" <<EOF
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>7</integer>
+        <integer>${SCHEDULE_HOUR}</integer>
         <key>Minute</key>
-        <integer>0</integer>
+        <integer>${SCHEDULE_MINUTE}</integer>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -74,5 +77,5 @@ launchctl bootout gui/$(id -u) "$PLIST_DEST" 2>/dev/null || true
 launchctl bootstrap gui/$(id -u) "$PLIST_DEST"
 
 echo "Installed and loaded ${PLIST_NAME}"
-echo "The wallpaper will update daily at 7:00 AM."
+printf "The wallpaper will update daily at %02d:%02d.\n" "$SCHEDULE_HOUR" "$SCHEDULE_MINUTE"
 echo "To uninstall: $0 uninstall"

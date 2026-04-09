@@ -18,6 +18,7 @@
  *   GET  /api/settings           - Current display/render settings
  *   PUT  /api/settings           - Update display/render settings
  *   GET  /api/schedule           - Scheduler status (platform-aware)
+ *   PUT  /api/schedule/time      - Update scheduled time (reinstalls if active)
  *   POST /api/schedule/install   - Install the daily scheduler
  *   POST /api/schedule/uninstall - Remove the daily scheduler
  *
@@ -444,15 +445,28 @@ async function handleSchedule(res: http.ServerResponse) {
     } catch {}
   }
 
+  const { hour, minute } = config.scheduledTime;
+  const formattedTime = `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, "0")} ${hour < 12 ? "AM" : "PM"}`;
+
   sendJson(res, {
     platform,
     installed,
     loaded,
     status: loaded ? "running" : installed ? "installed" : "not installed",
-    scheduledTime: "7:00 AM",
+    scheduledTime: formattedTime,
+    scheduledHour: hour,
+    scheduledMinute: minute,
     lastLog,
     lastErr,
   });
+}
+
+function buildScheduleEnv(config: ReturnType<typeof loadConfig>): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    SCHEDULE_HOUR: String(config.scheduledTime.hour),
+    SCHEDULE_MINUTE: String(config.scheduledTime.minute),
+  };
 }
 
 async function handleScheduleInstall(res: http.ServerResponse) {
@@ -473,10 +487,71 @@ async function handleScheduleInstall(res: http.ServerResponse) {
       cmd = `bash "${script}"`;
     }
 
-    const output = execSync(cmd, { encoding: "utf-8" });
+    const output = execSync(cmd, { encoding: "utf-8", env: buildScheduleEnv(config) });
     sendJson(res, { success: true, output });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to install";
+    sendError(res, 500, message);
+  }
+}
+
+async function handleScheduleUpdateTime(req: http.IncomingMessage, res: http.ServerResponse) {
+  try {
+    const body = (await parseBody(req)) as { hour: number; minute: number };
+    const hour = Number(body.hour);
+    const minute = Number(body.minute);
+
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+      sendError(res, 400, "hour must be an integer 0–23");
+      return;
+    }
+    if (!Number.isInteger(minute) || minute < 0 || minute > 59) {
+      sendError(res, 400, "minute must be an integer 0–59");
+      return;
+    }
+
+    const configData = readConfigFile();
+    configData.scheduledTime = { hour, minute };
+    writeConfigFile(configData);
+
+    // If already installed, reinstall with the new time
+    const platform = detectPlatform();
+    const config = loadConfig();
+    const scheduleEnv = buildScheduleEnv(config);
+    let reinstalled = false;
+
+    try {
+      let isInstalled = false;
+      if (platform === "macos") {
+        const plistDest = resolve(config.cachePath, "..", "..", "Library", "LaunchAgents", "com.inspiration.daily.plist");
+        isInstalled = existsSync(plistDest);
+      } else if (platform === "windows") {
+        try { execSync('schtasks /Query /TN "DailyInspiration" 2>nul', { encoding: "utf-8" }); isInstalled = true; } catch {}
+      } else {
+        try { const out = execSync("crontab -l 2>/dev/null", { encoding: "utf-8" }); isInstalled = out.includes("inspiration"); } catch {}
+      }
+
+      if (isInstalled) {
+        let script: string;
+        let cmd: string;
+        if (platform === "macos") {
+          script = resolve(config.projectRoot, "scripts", "install-launchd.sh");
+          cmd = `bash "${script}"`;
+        } else if (platform === "windows") {
+          script = resolve(config.projectRoot, "scripts", "install-task-scheduler.ps1");
+          cmd = `powershell -NoProfile -ExecutionPolicy Bypass -File "${script}"`;
+        } else {
+          script = resolve(config.projectRoot, "scripts", "install-cron.sh");
+          cmd = `bash "${script}"`;
+        }
+        execSync(cmd, { encoding: "utf-8", env: scheduleEnv });
+        reinstalled = true;
+      }
+    } catch {}
+
+    sendJson(res, { success: true, hour, minute, reinstalled });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Failed to update schedule time";
     sendError(res, 500, message);
   }
 }
@@ -550,6 +625,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     if (path === "/api/schedule" && method === "GET") return handleSchedule(res);
     if (path === "/api/schedule/install" && method === "POST") return handleScheduleInstall(res);
     if (path === "/api/schedule/uninstall" && method === "POST") return handleScheduleUninstall(res);
+    if (path === "/api/schedule/time" && method === "PUT") return handleScheduleUpdateTime(req, res);
 
     // Archive image: /api/archive/2026-03-25.png
     if (path.startsWith("/api/archive/") && method === "GET") {

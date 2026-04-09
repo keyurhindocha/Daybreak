@@ -1,5 +1,7 @@
 param(
-    [switch]$Uninstall
+    [switch]$Uninstall,
+    [int]$Hour = $env:SCHEDULE_HOUR ? [int]$env:SCHEDULE_HOUR : 7,
+    [int]$Minute = $env:SCHEDULE_MINUTE ? [int]$env:SCHEDULE_MINUTE : 0
 )
 
 $TaskName = "DailyInspiration"
@@ -31,8 +33,9 @@ $Action = New-ScheduledTaskAction `
     -Argument "tsx src/index.ts" `
     -WorkingDirectory $ProjectDir
 
-# Trigger daily at 7:00 AM
-$Trigger = New-ScheduledTaskTrigger -Daily -At 7:00AM
+# Trigger daily at the configured time
+$TriggerTime = "{0:D2}:{1:D2}AM" -f $Hour, $Minute
+$Trigger = New-ScheduledTaskTrigger -Daily -At $TriggerTime
 
 # Run whether user is logged in or not (with current user)
 $Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
@@ -47,5 +50,5 @@ Register-ScheduledTask `
     -Force
 
 Write-Host "Installed scheduled task: $TaskName"
-Write-Host "The wallpaper will update daily at 7:00 AM."
+Write-Host ("The wallpaper will update daily at {0:D2}:{1:D2}." -f $Hour, $Minute)
 Write-Host "To uninstall: powershell $PSCommandPath -Uninstall"

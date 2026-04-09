@@ -517,6 +517,45 @@
     color: var(--text-dim);
   }
 
+  .schedule-time-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    max-width: 900px;
+  }
+
+  .schedule-time-row label {
+    font-size: 14px;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .schedule-time-row input[type="time"] {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 14px;
+    padding: 8px 12px;
+    outline: none;
+    transition: border-color 0.15s;
+    color-scheme: dark;
+  }
+
+  .schedule-time-row input[type="time"]:focus {
+    border-color: var(--accent);
+  }
+
+  .schedule-time-msg {
+    font-size: 13px;
+    color: var(--green);
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .schedule-time-msg.visible { opacity: 1; }
+
   .empty-state {
     color: var(--text-dim);
     font-size: 14px;
@@ -787,6 +826,13 @@
     <div class="schedule-status" id="schedule-status">
       <span class="status-badge not-installed" id="schedule-badge">Loading...</span>
       <span class="schedule-time" id="schedule-time"></span>
+    </div>
+
+    <div class="schedule-time-row">
+      <label for="schedule-time-input">Run daily at</label>
+      <input type="time" id="schedule-time-input" value="07:00">
+      <button class="btn btn-secondary" onclick="saveScheduleTime()">Save Time</button>
+      <span class="schedule-time-msg" id="schedule-time-msg"></span>
     </div>
 
     <div class="platform-instructions" id="platform-instructions"></div>
@@ -1175,7 +1221,7 @@ function renderPlatformInstructions(platform) {
   box.innerHTML = `
     <h3>${info.name} &mdash; ${info.scheduler}</h3>
     ${!isDetected ? '<div style="color:var(--yellow);font-size:13px;margin-bottom:12px;">This is not the detected OS for this machine. The install button will use the server\'s detected OS. To install manually, run the command below on the target machine.</div>' : ''}
-    <div style="margin-bottom:8px;">To install the daily schedule (7:00 AM):</div>
+    <div style="margin-bottom:8px;">To install the daily schedule (${document.getElementById('schedule-time-input').value || '07:00'}):</div>
     <code class="cmd-block">${info.install}</code>
     <div style="margin-bottom:8px;">To uninstall:</div>
     <code class="cmd-block">${info.uninstall}</code>
@@ -1205,6 +1251,11 @@ async function loadSchedule() {
 
     document.getElementById('schedule-time').textContent = data.loaded ? `Daily at ${data.scheduledTime}` : '';
 
+    // Populate time picker with the configured time
+    const hh = String(data.scheduledHour ?? 7).padStart(2, '0');
+    const mm = String(data.scheduledMinute ?? 0).padStart(2, '0');
+    document.getElementById('schedule-time-input').value = `${hh}:${mm}`;
+
     document.getElementById('schedule-install-btn').style.display = data.loaded ? 'none' : 'inline-block';
     document.getElementById('schedule-uninstall-btn').style.display = data.installed ? 'inline-block' : 'none';
 
@@ -1221,6 +1272,37 @@ async function loadSchedule() {
     }
   } catch (err) {
     document.getElementById('schedule-log').textContent = 'Failed to load schedule status';
+  }
+}
+
+async function saveScheduleTime() {
+  const input = document.getElementById('schedule-time-input');
+  const msg = document.getElementById('schedule-time-msg');
+  const [hourStr, minuteStr] = input.value.split(':');
+  const hour = parseInt(hourStr, 10);
+  const minute = parseInt(minuteStr, 10);
+
+  try {
+    const res = await fetch('/api/schedule/time', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hour, minute }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to save');
+
+    msg.textContent = data.reinstalled ? 'Saved & rescheduled' : 'Saved';
+    msg.style.color = 'var(--green)';
+    msg.classList.add('visible');
+    setTimeout(() => msg.classList.remove('visible'), 3000);
+
+    // Refresh status to reflect new time
+    loadSchedule();
+  } catch (err) {
+    msg.textContent = err.message || 'Error saving time';
+    msg.style.color = 'var(--red)';
+    msg.classList.add('visible');
+    setTimeout(() => msg.classList.remove('visible'), 4000);
   }
 }
 
