@@ -52,6 +52,9 @@ import type { QuoteSource } from "./quotes/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = 3456;
+const HOST = "127.0.0.1";
+const ALLOWED_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
+const MAX_BODY_BYTES = 64 * 1024;
 
 // ---------------------------------------------------------------------------
 // Quote state persistence
@@ -117,7 +120,15 @@ function sendError(res: http.ServerResponse, status: number, message: string) {
 async function parseBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk) => chunks.push(chunk));
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(new Error("Request body too large"));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString()));
@@ -393,13 +404,48 @@ async function handleUpdateSettings(req: http.IncomingMessage, res: http.ServerR
   const body = (await parseBody(req)) as Record<string, unknown>;
   const configData = readConfigFile();
 
-  if (body.background) configData.background = body.background;
-  if (body.font) configData.font = body.font;
-  if (body.resolution) configData.resolution = body.resolution;
+  // background values are interpolated into an SVG for sharp/librsvg, so
+  // only accept plain numbers in range.
+  if (body.background) {
+    const { darkenOpacity, blurSigma } = body.background as { darkenOpacity?: unknown; blurSigma?: unknown };
+    if (!isNumberInRange(darkenOpacity, 0, 1) || !isNumberInRange(blurSigma, 0, 100)) {
+      sendError(res, 400, "background.darkenOpacity must be 0–1 and blurSigma 0–100");
+      return;
+    }
+    configData.background = { darkenOpacity, blurSigma };
+  }
+  if (body.font) {
+    const { quote, attribution } = body.font as { quote?: unknown; attribution?: unknown };
+    if (!isFontName(quote) || !isFontName(attribution)) {
+      sendError(res, 400, "font names must be short strings");
+      return;
+    }
+    configData.font = { quote, attribution };
+  }
+  if (body.resolution) {
+    const { width, height } = body.resolution as { width?: unknown; height?: unknown };
+    if (!isValidDimension(width) || !isValidDimension(height)) {
+      sendError(res, 400, "resolution width/height must be integers between 100 and 8192");
+      return;
+    }
+    configData.resolution = { width, height };
+  }
   if (typeof body.setAllDisplays === "boolean") configData.setAllDisplays = body.setAllDisplays;
 
   writeConfigFile(configData);
   sendJson(res, { success: true });
+}
+
+function isNumberInRange(n: unknown, min: number, max: number): n is number {
+  return typeof n === "number" && Number.isFinite(n) && n >= min && n <= max;
+}
+
+function isFontName(s: unknown): s is string {
+  return typeof s === "string" && s.length <= 100 && !/["\\]/.test(s);
+}
+
+function isValidDimension(n: unknown): n is number {
+  return Number.isInteger(n) && (n as number) >= 100 && (n as number) <= 8192;
 }
 
 async function handlePlatform(res: http.ServerResponse) {
@@ -590,13 +636,17 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   const path = url.pathname;
   const method = req.method ?? "GET";
 
-  // CORS for local dev
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (method === "OPTIONS") {
-    res.writeHead(204);
-    res.end();
+  // The UI is served from this same origin, so no CORS headers are sent:
+  // other websites must not be able to drive this API from the browser.
+  // The Host check blocks DNS-rebinding; the Origin check blocks cross-site
+  // form/fetch posts, which browsers send without a CORS preflight.
+  if (!ALLOWED_HOSTS.has(req.headers.host ?? "")) {
+    sendError(res, 403, "Forbidden host");
+    return;
+  }
+  const origin = req.headers.origin;
+  if (method !== "GET" && origin !== undefined && !ALLOWED_HOSTS.has(origin.replace(/^http:\/\//, ""))) {
+    sendError(res, 403, "Forbidden origin");
     return;
   }
 
@@ -611,27 +661,27 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     }
 
     // API routes
-    if (path === "/api/today" && method === "GET") return handleToday(res);
-    if (path === "/api/generate" && method === "POST") return handleGenerate(req, res);
-    if (path === "/api/generate/iphone" && method === "POST") return handleGenerateIphone(res);
-    if (path === "/api/wallpaper/iphone" && method === "GET") return handleWallpaperIphone(res);
-    if (path === "/api/wallpaper/today" && method === "GET") return handleWallpaperToday(res);
-    if (path === "/api/archive" && method === "GET") return handleArchiveList(res);
-    if (path === "/api/sources" && method === "GET") return handleSources(res);
-    if (path === "/api/sources" && method === "PUT") return handleUpdateSources(req, res);
-    if (path === "/api/settings" && method === "GET") return handleSettings(res);
-    if (path === "/api/settings" && method === "PUT") return handleUpdateSettings(req, res);
-    if (path === "/api/platform" && method === "GET") return handlePlatform(res);
-    if (path === "/api/schedule" && method === "GET") return handleSchedule(res);
-    if (path === "/api/schedule/install" && method === "POST") return handleScheduleInstall(res);
-    if (path === "/api/schedule/uninstall" && method === "POST") return handleScheduleUninstall(res);
-    if (path === "/api/schedule/time" && method === "PUT") return handleScheduleUpdateTime(req, res);
+    if (path === "/api/today" && method === "GET") return await handleToday(res);
+    if (path === "/api/generate" && method === "POST") return await handleGenerate(req, res);
+    if (path === "/api/generate/iphone" && method === "POST") return await handleGenerateIphone(res);
+    if (path === "/api/wallpaper/iphone" && method === "GET") return await handleWallpaperIphone(res);
+    if (path === "/api/wallpaper/today" && method === "GET") return await handleWallpaperToday(res);
+    if (path === "/api/archive" && method === "GET") return await handleArchiveList(res);
+    if (path === "/api/sources" && method === "GET") return await handleSources(res);
+    if (path === "/api/sources" && method === "PUT") return await handleUpdateSources(req, res);
+    if (path === "/api/settings" && method === "GET") return await handleSettings(res);
+    if (path === "/api/settings" && method === "PUT") return await handleUpdateSettings(req, res);
+    if (path === "/api/platform" && method === "GET") return await handlePlatform(res);
+    if (path === "/api/schedule" && method === "GET") return await handleSchedule(res);
+    if (path === "/api/schedule/install" && method === "POST") return await handleScheduleInstall(res);
+    if (path === "/api/schedule/uninstall" && method === "POST") return await handleScheduleUninstall(res);
+    if (path === "/api/schedule/time" && method === "PUT") return await handleScheduleUpdateTime(req, res);
 
     // Archive image: /api/archive/2026-03-25.png
     if (path.startsWith("/api/archive/") && method === "GET") {
       const filename = path.slice("/api/archive/".length);
       const thumb = url.searchParams.get("thumb") === "1";
-      return handleArchiveImage(res, filename, thumb);
+      return await handleArchiveImage(res, filename, thumb);
     }
 
     sendError(res, 404, "Not found");
@@ -647,7 +697,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 // ---------------------------------------------------------------------------
 
 const server = http.createServer(handleRequest);
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   console.log(`\n  Inspiration UI running at http://localhost:${PORT}\n`);
   try {
     execSync(openUrl(`http://localhost:${PORT}`));
